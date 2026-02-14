@@ -1,37 +1,113 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>MissionControlMobile</title>
-    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
-    <style id="expo-reset">
-      /* These styles make the body full-height */
-      html,
-      body {
-        height: 100%;
-      }
-      /* These styles disable body scrolling if you are using <ScrollView> */
-      body {
-        overflow: hidden;
-      }
-      /* These styles make the root element full-height */
-      #root {
-        display: flex;
-        height: 100%;
-        flex: 1;
-      }
-    </style>
-  <link rel="icon" href="/favicon.ico" /></head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0d1117">
+    <title>Mission Control</title>
+    <style>
+        body { background-color: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; -webkit-tap-highlight-color: transparent; }
+        h1 { text-align: center; color: #2ed573; margin-bottom: 10px; font-weight: 900; letter-spacing: 1px; font-size: 24px; text-transform: uppercase; text-shadow: 0 0 10px rgba(46, 213, 115, 0.3); }
+        .status { text-align: center; font-size: 12px; color: #2ed573; margin-bottom: 30px; opacity: 0.8; font-family: monospace; }
+        
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; padding-bottom: 40px; }
+        
+        .card { 
+            background: #161b22; 
+            border: 1px solid #30363d; 
+            border-radius: 16px; 
+            padding: 15px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: space-between;
+            min-height: 120px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s active;
+        }
+        .card:active { transform: scale(0.98); background: #21262d; }
+        
+        .card-title { color: #58a6ff; font-size: 16px; font-weight: bold; margin-bottom: 5px; }
+        .card-desc { color: #8b949e; font-size: 11px; line-height: 1.4; }
+        .indicator { width: 8px; height: 8px; background-color: #238636; border-radius: 50%; align-self: flex-end; margin-top: 10px; box-shadow: 0 0 5px #238636; }
 
-  <body>
-    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
-    <noscript>
-      You need to enable JavaScript to run this app.
-    </noscript>
-    <!-- The root element for your Expo app. -->
-    <div id="root"></div>
-  <script src="/_expo/static/js/web/index-fbd7e841f10fdb5ec01c3efe8625248d.js" defer></script>
+        /* Detail View */
+        #detail-view { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0d1117; padding: 20px; box-sizing: border-box; overflow-y: auto; z-index: 100; }
+        .back-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 12px; border-radius: 12px; font-weight: bold; margin-bottom: 20px; display: inline-block; width: 100%; text-align: center; box-sizing: border-box; }
+        .agent-row { background: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .agent-info { flex: 1; }
+        .agent-name { font-weight: bold; color: #e6edf3; display: block; font-size: 16px; }
+        .agent-role { font-size: 12px; color: #8b949e; margin-top: 2px; display: block; }
+        .chat-btn { background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="main-view">
+        <h1>🦅 Mission Control</h1>
+        <div class="status">SYSTEM: ONLINE 🟢</div>
+        <div id="grid" class="grid"></div>
+    </div>
+
+    <div id="detail-view">
+        <div class="back-btn" onclick="closeDetail()">⬅ BACK TO HQ</div>
+        <h2 id="detail-title" style="color: #58a6ff; margin-top: 0;"></h2>
+        <div id="detail-list"></div>
+    </div>
+
+    <script>
+        const SQUADS = [
+            { id: 'life', name: 'LIFE OPS 🏥', desc: 'Health, Home & Logistics', agents: [ {n:'Doctor',r:'Medical'}, {n:'Vet',r:'Catahoula Care'}, {n:'Chef',r:'Nutrition'} ] },
+            { id: 'trades', name: 'TRADES 🏗️', desc: 'Construction & Repair', agents: [ {n:'Mason',r:'Stone'}, {n:'Electrician',r:'Power'}, {n:'Plumber',r:'Water'} ] },
+            { id: 'cyber', name: 'CYBER 💻', desc: 'Digital Offense & Defense', agents: [ {n:'Black Hat',r:'Offense'}, {n:'Cyber Sec',r:'Defense'}, {n:'Coder',r:'Dev'} ] },
+            { id: 'wealth', name: 'WEALTH 💰', desc: 'Cash Flow & Assets', agents: [ {n:'Revenue',r:'Cash Flow'}, {n:'Realtor',r:'Property'}, {n:'Legal',r:'Defense'} ] },
+            { id: 'mystic', name: 'MYSTIC 🔮', desc: 'Energy & Knowledge', agents: [ {n:'Tarot',r:'Divination'}, {n:'Energy',r:'Vibes'}, {n:'Astro',r:'Stars'} ] },
+            { id: 'nature', name: 'NATURE 🌿', desc: 'Survival & Farming', agents: [ {n:'Survivalist',r:'Wild'}, {n:'Farmer',r:'Crops'}, {n:'Energy Eng',r:'Solar'} ] },
+            { id: 'social', name: 'SOCIAL 🥂', desc: 'Influence & Lifestyle', agents: [ {n:'Mogul',r:'Fame'}, {n:'Creative',r:'Content'}, {n:'Dancer',r:'Rhythm'} ] },
+            { id: 'intel', name: 'INTEL 🎓', desc: 'Research & Answers', agents: [ {n:'PI',r:'Investigation'}, {n:'Researcher',r:'Deep Dive'}, {n:'Test Ace',r:'Exams'} ] }
+        ];
+
+        const grid = document.getElementById('grid');
+        
+        SQUADS.forEach(squad => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.onclick = () => openDetail(squad);
+            card.innerHTML = `
+                <div>
+                    <div class="card-title">${squad.name}</div>
+                    <div class="card-desc">${squad.desc}</div>
+                </div>
+                <div class="indicator"></div>
+            `;
+            grid.appendChild(card);
+        });
+
+        function openDetail(squad) {
+            document.getElementById('main-view').style.display = 'none';
+            document.getElementById('detail-view').style.display = 'block';
+            document.getElementById('detail-title').innerText = squad.name;
+            
+            const list = document.getElementById('detail-list');
+            list.innerHTML = '';
+            squad.agents.forEach(agent => {
+                const row = document.createElement('div');
+                row.className = 'agent-row';
+                row.innerHTML = `
+                    <div class="agent-info">
+                        <span class="agent-name">🟢 ${agent.n}</span>
+                        <span class="agent-role">${agent.r}</span>
+                    </div>
+                    <button class="chat-btn">CHAT</button>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        function closeDetail() {
+            document.getElementById('main-view').style.display = 'block';
+            document.getElementById('detail-view').style.display = 'none';
+        }
+    </script>
+
 </body>
 </html>
