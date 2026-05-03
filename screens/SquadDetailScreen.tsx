@@ -20,7 +20,7 @@ export default function SquadDetailScreen() {
         data={squad.agents}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.agentRow} onPress={() => alert(`Connecting to ${item.name}...`)}>
+          <TouchableOpacity style={styles.agentRow} onPress={() => navigation.navigate('AgentChat', { agentName: item.name, agentRole: item.role })}>
             <View>
               <Text style={styles.agentName}>🟢 {item.name}</Text>
               <Text style={styles.agentRole}>{item.role}</Text>
