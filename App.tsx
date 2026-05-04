@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import DashboardScreen from './screens/DashboardScreen';
 import SquadDetailScreen from './screens/SquadDetailScreen';
 import AgentChatScreen from './screens/AgentChatScreen';
+import SettingsScreen from './screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -17,6 +18,17 @@ export default function App() {
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="SquadDetail" component={SquadDetailScreen} />
         <Stack.Screen name="AgentChat" component={AgentChatScreen} />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{
+            headerShown: true,
+            title: 'Settings',
+            headerStyle: { backgroundColor: '#0d1117' },
+            headerTintColor: '#c9d1d9',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

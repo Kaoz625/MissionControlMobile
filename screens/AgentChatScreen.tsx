@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -10,17 +10,63 @@ import {
   MAX_TOKENS, API_KEY_STORAGE_KEY,
 } from '../src/config';
 
-interface Message { id: string; role: 'user' | 'assistant'; content: string; }
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  ts: string;
+}
+
+function nowHHMM(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 export default function AgentChatScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const route = useRoute();
   const { agentName, agentRole } = route.params as { agentName: string; agentRole: string };
+
+  const chatKey = `mc_chat_${agentName}`;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
   const listRef = useRef<FlatList>(null);
+
+  // Load persisted chat on mount
+  useEffect(() => {
+    AsyncStorage.getItem(chatKey).then(raw => {
+      if (raw) {
+        try { setMessages(JSON.parse(raw)); } catch {}
+      }
+    });
+  }, [chatKey]);
+
+  // Persist whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      AsyncStorage.setItem(chatKey, JSON.stringify(messages));
+    }
+  }, [messages, chatKey]);
+
+  const clearChat = useCallback(async () => {
+    await AsyncStorage.removeItem(chatKey);
+    setMessages([]);
+    setStreamingText('');
+  }, [chatKey]);
+
+  // Wire Clear button into header
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={clearChat} style={{ marginRight: 16 }}>
+          <Text style={{ color: '#ff6b6b', fontSize: 13, fontWeight: '600' }}>Clear</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, clearChat]);
 
   const systemPrompt = `You are ${agentName}, an expert in ${agentRole}. You are part of the NYC Tailblazers Mission Control team. Be direct, precise, and useful. NYC style — no corporate filler.`;
 
@@ -29,17 +75,19 @@ export default function AgentChatScreen() {
     if (!text || loading) return;
     setInput('');
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: text };
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: text, ts: nowHHMM() };
     const next = [...messages, userMsg];
     setMessages(next);
     setLoading(true);
+    setStreamingText('');
 
     try {
       const apiKey = await AsyncStorage.getItem(API_KEY_STORAGE_KEY);
       if (!apiKey) {
         setMessages(m => [...m, {
           id: Date.now().toString(), role: 'assistant',
-          content: 'No API key set. Add your Anthropic API key in Settings.',
+          content: 'No API key set. Go to Settings and add your Anthropic API key.',
+          ts: nowHHMM(),
         }]);
         setLoading(false);
         return;
@@ -51,10 +99,12 @@ export default function AgentChatScreen() {
           'Content-Type': 'application/json',
           'x-api-key': apiKey,
           'anthropic-version': ANTHROPIC_VERSION,
+          'anthropic-beta': 'prompt-caching-2024-07-31',
         },
         body: JSON.stringify({
           model: ANTHROPIC_MODEL,
           max_tokens: MAX_TOKENS,
+          stream: true,
           system: systemPrompt,
           messages: next.map(m => ({ role: m.role, content: m.content })),
         }),
@@ -65,16 +115,64 @@ export default function AgentChatScreen() {
         throw new Error(`${resp.status}: ${err.slice(0, 120)}`);
       }
 
-      const data = await resp.json();
-      const reply = data.content?.[0]?.text ?? '(no response)';
-      setMessages(m => [...m, { id: Date.now().toString(), role: 'assistant', content: reply }]);
+      // Stream SSE response
+      const reader = resp.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                accumulated += parsed.delta.text;
+                setStreamingText(accumulated);
+                setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
+              }
+            } catch {
+              // malformed SSE line — skip
+            }
+          }
+        }
+      }
+
+      const finalText = accumulated || '(no response)';
+      setStreamingText('');
+      setMessages(m => [...m, {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: finalText,
+        ts: nowHHMM(),
+      }]);
     } catch (e: any) {
-      setMessages(m => [...m, { id: Date.now().toString(), role: 'assistant', content: `Error: ${e.message}` }]);
+      setStreamingText('');
+      setMessages(m => [...m, {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `Error: ${e.message}`,
+        ts: nowHHMM(),
+      }]);
     } finally {
       setLoading(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }
+
+  // Combine persisted messages + live streaming bubble
+  const displayMessages = streamingText
+    ? [...messages, { id: 'streaming', role: 'assistant' as const, content: streamingText, ts: nowHHMM() }]
+    : messages;
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -91,12 +189,15 @@ export default function AgentChatScreen() {
 
       <FlatList
         ref={listRef}
-        data={messages}
+        data={displayMessages}
         keyExtractor={m => m.id}
         contentContainerStyle={styles.messageList}
         renderItem={({ item }) => (
-          <View style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.aiBubble]}>
-            <Text style={styles.bubbleText}>{item.content}</Text>
+          <View style={[styles.bubbleWrap, item.role === 'user' ? styles.userWrap : styles.aiWrap]}>
+            <View style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.aiBubble]}>
+              <Text style={styles.bubbleText}>{item.content}</Text>
+            </View>
+            <Text style={styles.timestamp}>{item.ts}</Text>
           </View>
         )}
         ListEmptyComponent={
@@ -104,7 +205,12 @@ export default function AgentChatScreen() {
         }
       />
 
-      {loading && <ActivityIndicator color="#2ed573" style={styles.spinner} />}
+      {loading && !streamingText && (
+        <View style={styles.typingRow}>
+          <ActivityIndicator color="#2ed573" size="small" />
+          <Text style={styles.typingText}>  {agentName} is thinking…</Text>
+        </View>
+      )}
 
       <View style={styles.inputRow}>
         <TextInput
@@ -132,12 +238,17 @@ const styles = StyleSheet.create({
   agentRole:   { color: '#8b949e', fontSize: 11 },
   model:       { color: '#30363d', fontSize: 10 },
   messageList: { padding: 16, paddingBottom: 8 },
-  bubble:      { maxWidth: '85%', padding: 12, borderRadius: 12, marginBottom: 10 },
-  userBubble:  { backgroundColor: '#21262d', alignSelf: 'flex-end', borderBottomRightRadius: 4 },
-  aiBubble:    { backgroundColor: '#161b22', alignSelf: 'flex-start', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#30363d' },
+  bubbleWrap:  { marginBottom: 10 },
+  userWrap:    { alignItems: 'flex-end' },
+  aiWrap:      { alignItems: 'flex-start' },
+  bubble:      { maxWidth: '85%', padding: 12, borderRadius: 12 },
+  userBubble:  { backgroundColor: '#21262d', borderBottomRightRadius: 4 },
+  aiBubble:    { backgroundColor: '#161b22', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#30363d' },
   bubbleText:  { color: '#c9d1d9', fontSize: 14, lineHeight: 20 },
+  timestamp:   { color: '#444', fontSize: 10, marginTop: 3, marginHorizontal: 4 },
   empty:       { color: '#555', textAlign: 'center', marginTop: 60, fontSize: 13 },
-  spinner:     { marginVertical: 8 },
+  typingRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 6 },
+  typingText:  { color: '#2ed573', fontSize: 12 },
   inputRow:    { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#21262d', alignItems: 'flex-end' },
   input:       { flex: 1, backgroundColor: '#161b22', color: '#c9d1d9', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: '#30363d' },
   sendBtn:     { marginLeft: 10, backgroundColor: '#238636', borderRadius: 8, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },

@@ -4,11 +4,17 @@ import { useNavigation } from '@react-navigation/native';
 import { SQUADS } from '../data/roster';
 
 export default function DashboardScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+      <View style={styles.topRow}>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.gearBtn}>
+          <Text style={styles.gearText}>⚙️</Text>
+        </TouchableOpacity>
+      </View>
       <Text style={styles.header}>🦅 MISSION CONTROL</Text>
       <Text style={styles.status}>SYSTEM: ONLINE 🟢</Text>
 
@@ -34,6 +40,9 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0d1117', padding: 20, paddingTop: 60 },
+  topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  gearBtn: { padding: 4 },
+  gearText: { fontSize: 22 },
   header: { fontSize: 24, fontWeight: '900', color: '#2ed573', textAlign: 'center', letterSpacing: 2 },
   status: { fontSize: 12, color: '#2ed573', textAlign: 'center', marginBottom: 30, opacity: 0.8 },
   grid: { paddingBottom: 40 },
